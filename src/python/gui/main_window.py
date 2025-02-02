@@ -8,12 +8,22 @@ from PyQt6.QtWidgets import (
     QTextEdit,
 )
 from PyQt6.QtCore import Qt, QTimer, QThread, pyqtSignal, pyqtSlot
-from PyQt6.QtGui import QAction, QTextDocument, QFont
+from PyQt6.QtGui import (
+    QAction,
+    QTextDocument,
+    QFont,
+    QTextCharFormat,
+    QColor,
+    QSyntaxHighlighter,
+)
 import os
 from typing import Set, Dict
 from core.file_loader import FileLoader
 from core.file_watcher import FileWatcher
 from utils.logger import setup_logger
+import re
+import json
+from datetime import datetime
 
 logger = setup_logger(__name__)
 
@@ -38,6 +48,98 @@ class FileLoaderThread(QThread):
             self.error_occurred.emit(self.file_path, str(e))
 
 
+class LogHighlighter(QSyntaxHighlighter):
+    """Syntax highlighter for log levels"""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.formats = {
+            "DEBUG": self._create_format(QColor("#4A90E2")),    # Blue
+            "INFO": self._create_format(QColor("#2ECC71")),     # Green
+            "WARNING": self._create_format(QColor("#F1C40F")),  # Yellow
+            "ERROR": self._create_format(QColor("#E74C3C")),    # Red
+            "CRITICAL": self._create_format(QColor("#C0392B")), # Dark Red
+        }
+        
+        # Regular expression for matching log levels
+        self.log_pattern = re.compile(
+            r"\b(DEBUG|INFO|WARNING|ERROR|CRITICAL)\b"
+        )
+
+    def _create_format(self, color: QColor) -> QTextCharFormat:
+        format = QTextCharFormat()
+        format.setForeground(color)
+        format.setFontWeight(QFont.Weight.Bold)
+        return format
+
+    def highlightBlock(self, text: str):
+        for match in self.log_pattern.finditer(text):
+            level = match.group(1)
+            if level in self.formats:
+                self.setFormat(
+                    match.start(),
+                    match.end() - match.start(),
+                    self.formats[level]
+                )
+
+
+class LogFormatter:
+    """Log formatter for log entries"""
+
+    def __init__(self, document: QTextDocument):
+        self.document = document
+        self.log_patterns = [
+            # JSON format
+            re.compile(r'^\s*({.*})\s*$'),
+            # Common log format: timestamp level message
+            re.compile(r'^\s*(\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:[-+]\d{2}:?\d{2})?)\s+(\w+)\s+(.*)$'),
+            # Simple format: level message
+            re.compile(r'^\s*(\w+):\s+(.*)$')
+        ]
+
+    def format_log_entry(self, line: str) -> str:
+        """Format a log entry with proper structure and color hints."""
+        try:
+            # Try parsing as JSON first
+            json_match = self.log_patterns[0].match(line.strip())
+            if json_match:
+                try:
+                    log_data = json.loads(json_match.group(1))
+                    timestamp = log_data.get("timestamp", "")
+                    level = log_data.get("level", "")
+                    message = log_data.get("message", "")
+
+                    if timestamp and level and message:
+                        # Format the timestamp and level
+                        level = level.ljust(8)
+
+                        # Add function and line info if available
+                        if "function" in log_data and "line" in log_data:
+                            message = f"{message} ({log_data['function']}:{log_data['line']})"
+
+                        return f"{timestamp} {level} {message}"
+                except json.JSONDecodeError:
+                    pass
+
+            # Try common log format
+            common_match = self.log_patterns[1].match(line)
+            if common_match:
+                timestamp, level, message = common_match.groups()
+                return f"{timestamp} {level:8} {message}"
+
+            # Try simple format
+            simple_match = self.log_patterns[2].match(line)
+            if simple_match:
+                level, message = simple_match.groups()
+                return f"{datetime.now().isoformat()} {level:8} {message}"
+
+        except Exception as e:
+            logger.error(f"Error formatting log entry: {e}")
+
+        # If no pattern matches, return the original line
+        return line
+
+
 class LogViewWidget(QTextEdit):
     """Widget for displaying log content."""
 
@@ -50,12 +152,16 @@ class LogViewWidget(QTextEdit):
         self.setFont(font)
         self.setLineWrapMode(QTextEdit.LineWrapMode.NoWrap)
         self.setDocument(QTextDocument(self))
+        self.highlighter = LogHighlighter(self.document())
+        self.log_formatter = LogFormatter(self.document())
+
         self.load_content()
 
     def load_content(self):
         try:
-            content = "\n".join(self.loader.read_lines(0, self.loader.get_line_count()))
-            self.setPlainText(content)
+            lines = self.loader.read_lines(0, self.loader.get_line_count())
+            formatted_lines = [self.log_formatter.format_log_entry(line) for line in lines]
+            self.setPlainText("\n".join(formatted_lines))
         except Exception as e:
             logger.error(f"Error loading content for {self.file_path}: {e}")
             self.setPlainText(f"Error loading file: {e}")

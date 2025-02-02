@@ -1,7 +1,15 @@
+# GUI and Core Dependencies
 PyQt6>=6.6.1
 watchdog>=3.0.0
 pybind11>=2.11.1
+psutil>=5.9.5
+# Data Processing
 pandas>=2.1.4
+
+# Development Dependencies
 pytest>=7.4.3
 pytest-qt>=4.2.0
 black>=25.1.0
+
+# Build Dependencies
+pyinstaller>=6.3.0

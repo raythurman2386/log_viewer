@@ -17,39 +17,47 @@ public:
     std::vector<std::string> readLines(size_t start, size_t count) {
         std::vector<std::string> lines;
         std::ifstream file(filePath);
-        
+
         if (!file.is_open()) {
             throw std::runtime_error("Could not open file: " + filePath);
         }
 
-        // Skip lines until start
+        file.seekg(std::ios::beg);
         std::string line;
-        for (size_t i = 0; i < start; ++i) {
-            if (!std::getline(file, line)) {
-                return lines;
-            }
+        size_t currentLine = 0;
+
+        while (currentLine < start && std::getline(file, line)) {
+            ++currentLine;
         }
 
-        // Read requested lines
-        for (size_t i = 0; i < count; ++i) {
-            if (!std::getline(file, line)) {
-                break;
-            }
+        while (count-- > 0 && std::getline(file, line)) {
             lines.push_back(line);
         }
 
         return lines;
     }
 
-    size_t getLineCount() const {
+
+    size_t getLineCount(bool forceUpdate = false) {
+        if (forceUpdate) {
+            updateFileInfo();
+        }
         return lineCount;
     }
 
+
     bool hasChanged() const {
+    #ifdef _WIN32
+        struct _stat64 currentStat;
+        if (_stat64(filePath.c_str(), &currentStat) != 0) {
+            return true; // File is inaccessible, assume changed
+        }
+    #else
         struct stat currentStat;
         if (stat(filePath.c_str(), &currentStat) != 0) {
-            return false;
+            return true; // File is inaccessible, assume changed
         }
+    #endif
         return currentStat.st_mtime != lastModified;
     }
 
@@ -63,23 +71,33 @@ private:
     size_t lineCount;
 
     void updateFileInfo() {
+    #ifdef _WIN32
+        struct _stat64 fileStat;
+        if (_stat64(filePath.c_str(), &fileStat) != 0) {
+            throw std::runtime_error("Could not stat file: " + filePath);
+        }
+    #else
         struct stat fileStat;
         if (stat(filePath.c_str(), &fileStat) != 0) {
             throw std::runtime_error("Could not stat file: " + filePath);
         }
-        lastModified = fileStat.st_mtime;
+    #endif
 
-        // Count lines
         std::ifstream file(filePath);
-        if (!file.is_open()) {
+        if (!file) {
             throw std::runtime_error("Could not open file: " + filePath);
         }
 
-        lineCount = 0;
+        time_t newModified = fileStat.st_mtime;
+        size_t newLineCount = 0;
         std::string line;
+
         while (std::getline(file, line)) {
-            ++lineCount;
+            ++newLineCount;
         }
+
+        lastModified = newModified;
+        lineCount = newLineCount;
     }
 };
 

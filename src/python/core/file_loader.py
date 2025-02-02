@@ -1,23 +1,23 @@
 import os
 import mmap
-from typing import List, Optional
+from pathlib import Path
+from typing import List
 from datetime import datetime
 import sys
-from pathlib import Path
-from utils.logger import setup_logger
+from src.python.utils.logger import setup_logger
+from src.python.utils.memory_helpers import log_memory_usage
 
 logger = setup_logger(__name__)
 
 # Try to import C++ module
 try:
-    # Add the build directory to Python path
-    build_dir = Path(__file__).parent.parent.parent.parent / "build" / "Release"
+    build_dir = Path(__file__).resolve().parent.parent.parent.parent / "build" / "Release"
     sys.path.append(str(build_dir))
     import logviewer_cpp
 
     USING_CPP = True
 except ImportError as e:
-    logger.warning(f"Could not load C++ module, falling back to Python implementation: {e}")
+    logger.warning(f"Could not load C++ module, falling back to Python: {e}")
     USING_CPP = False
 
 
@@ -25,7 +25,7 @@ class PythonFileLoader:
     """Pure Python implementation of the file loader."""
 
     def __init__(self, file_path: str):
-        self.file_path = file_path
+        self.file_path = Path(file_path).resolve()
         self._line_positions: List[int] = []
         self._last_modified: float = 0
         self._total_lines: int = 0
@@ -34,32 +34,35 @@ class PythonFileLoader:
 
     def _cache_line_positions(self) -> None:
         """Cache the positions of all line beginnings for fast random access."""
+        log_memory_usage("Before caching line positions")
         self._line_positions = [0]  # First line starts at position 0
         self._total_lines = 0
 
         try:
-            file_stat = os.stat(self.file_path)
+            file_stat = self.file_path.stat()
             self._file_size = file_stat.st_size
             self._last_modified = file_stat.st_mtime
 
-            # Handle empty files
             if self._file_size == 0:
-                return
+                return  # Empty file
 
-            with open(self.file_path, "rb") as f:
-                # For small files (< 1MB), read directly
-                if self._file_size < 1024 * 1024:
-                    self._cache_from_content(f.read())
-                else:
-                    # Try memory mapping for larger files
+            with self.file_path.open("rb") as f:
+                # Normalize line endings for cross-platform consistency
+                content = f.read().replace(b"\r\n", b"\n")
+
+                # Memory-map large files (Windows requires special handling)
+                if self._file_size >= 1024 * 1024:
                     try:
                         with mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ) as mm:
-                            self._cache_from_content(mm)
-                    except ValueError as e:
-                        # Fall back to regular file reading
-                        logger.warning(f"Could not memory map {self.file_path}: {e}")
-                        f.seek(0)
-                        self._cache_from_content(f.read())
+                            self._cache_from_content(mm[:].replace(b"\r\n", b"\n"))
+                            log_memory_usage("After memory mapping large file")
+                    except ValueError:
+                        logger.warning(
+                            f"Memory mapping failed for {self.file_path}, using fallback"
+                        )
+                        self._cache_from_content(content)
+                else:
+                    self._cache_from_content(content)
 
             # If file doesn't end with newline, count the last line
             if self._file_size > 0 and (
@@ -67,7 +70,7 @@ class PythonFileLoader:
             ):
                 self._total_lines += 1
 
-        except (IOError, OSError) as e:
+        except (OSError, IOError) as e:
             logger.error(f"Error reading file {self.file_path}: {e}")
             raise
 
@@ -91,7 +94,7 @@ class PythonFileLoader:
         lines = []
 
         try:
-            with open(self.file_path, "r", encoding="utf-8") as f:
+            with self.file_path.open("r", encoding="utf-8", errors="replace") as f:
                 for i in range(start, end):
                     f.seek(self._line_positions[i])
                     if i + 1 < len(self._line_positions):
@@ -100,7 +103,7 @@ class PythonFileLoader:
                     else:
                         line = f.readline()
                     lines.append(line.rstrip("\n"))
-        except (IOError, OSError) as e:
+        except (OSError, IOError) as e:
             logger.error(f"Error reading lines from {self.file_path}: {e}")
             return []
 
@@ -113,7 +116,7 @@ class PythonFileLoader:
     def has_changed(self) -> bool:
         """Check if the file has been modified."""
         try:
-            current_mtime = os.path.getmtime(self.file_path)
+            current_mtime = self.file_path.stat().st_mtime
             return current_mtime > self._last_modified
         except OSError:
             return False
@@ -136,15 +139,15 @@ class FileLoader:
     """Main file loader that uses C++ implementation when available."""
 
     def __init__(self, file_path: str):
-        self.file_path = file_path
+        self.file_path = Path(file_path).resolve()
         try:
             if USING_CPP:
-                self._impl = logviewer_cpp.FileLoader(file_path)
+                self._impl = logviewer_cpp.FileLoader(str(self.file_path))
             else:
                 raise ImportError("C++ implementation not available")
         except Exception as e:
             logger.info(f"Using Python implementation: {e}")
-            self._impl = PythonFileLoader(file_path)
+            self._impl = PythonFileLoader(self.file_path)
 
     def read_lines(self, start: int, count: int) -> List[str]:
         return self._impl.read_lines(start, count)

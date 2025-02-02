@@ -2,7 +2,7 @@ import os
 from typing import Dict, Callable
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
-from utils.logger import setup_logger
+from src.python.utils.logger import setup_logger
 
 logger = setup_logger(__name__)
 

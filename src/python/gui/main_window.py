@@ -18,12 +18,13 @@ from PyQt6.QtGui import (
 )
 import os
 from typing import Set, Dict
-from core.file_loader import FileLoader
-from core.file_watcher import FileWatcher
-from utils.logger import setup_logger
+from src.python.core.file_loader import FileLoader
+from src.python.core.file_watcher import FileWatcher
+from src.python.utils.logger import setup_logger
 import re
 import json
 from datetime import datetime
+from src.python.utils.memory_helpers import log_memory_usage
 
 logger = setup_logger(__name__)
 
@@ -54,17 +55,15 @@ class LogHighlighter(QSyntaxHighlighter):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.formats = {
-            "DEBUG": self._create_format(QColor("#4A90E2")),    # Blue
-            "INFO": self._create_format(QColor("#2ECC71")),     # Green
+            "DEBUG": self._create_format(QColor("#4A90E2")),  # Blue
+            "INFO": self._create_format(QColor("#2ECC71")),  # Green
             "WARNING": self._create_format(QColor("#F1C40F")),  # Yellow
-            "ERROR": self._create_format(QColor("#E74C3C")),    # Red
-            "CRITICAL": self._create_format(QColor("#C0392B")), # Dark Red
+            "ERROR": self._create_format(QColor("#E74C3C")),  # Red
+            "CRITICAL": self._create_format(QColor("#C0392B")),  # Dark Red
         }
-        
+
         # Regular expression for matching log levels
-        self.log_pattern = re.compile(
-            r"\b(DEBUG|INFO|WARNING|ERROR|CRITICAL)\b"
-        )
+        self.log_pattern = re.compile(r"\b(DEBUG|INFO|WARNING|ERROR|CRITICAL)\b")
 
     def _create_format(self, color: QColor) -> QTextCharFormat:
         format = QTextCharFormat()
@@ -76,11 +75,7 @@ class LogHighlighter(QSyntaxHighlighter):
         for match in self.log_pattern.finditer(text):
             level = match.group(1)
             if level in self.formats:
-                self.setFormat(
-                    match.start(),
-                    match.end() - match.start(),
-                    self.formats[level]
-                )
+                self.setFormat(match.start(), match.end() - match.start(), self.formats[level])
 
 
 class LogFormatter:
@@ -90,11 +85,13 @@ class LogFormatter:
         self.document = document
         self.log_patterns = [
             # JSON format
-            re.compile(r'^\s*({.*})\s*$'),
+            re.compile(r"^\s*({.*})\s*$"),
             # Common log format: timestamp level message
-            re.compile(r'^\s*(\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:[-+]\d{2}:?\d{2})?)\s+(\w+)\s+(.*)$'),
+            re.compile(
+                r"^\s*(\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:[-+]\d{2}:?\d{2})?)\s+(\w+)\s+(.*)$"
+            ),
             # Simple format: level message
-            re.compile(r'^\s*(\w+):\s+(.*)$')
+            re.compile(r"^\s*(\w+):\s+(.*)$"),
         ]
 
     def format_log_entry(self, line: str) -> str:
@@ -168,18 +165,51 @@ class LogViewWidget(QTextEdit):
 
     def refresh(self):
         """Refresh the content if the file has changed."""
-        if self.loader.has_changed():
-            logger.debug(f"Refreshing content for {self.file_path}")
-            self.loader.reload()
-            current_scroll = self.verticalScrollBar().value()
-            self.load_content()
-            # Restore scroll position
-            self.verticalScrollBar().setValue(current_scroll)
+        if not self.loader.has_changed():
+            return
+            
+        log_memory_usage(f"Before refreshing content for {self.file_path}")
+        logger.debug(f"Refreshing content for {self.file_path}")
+        self.loader.reload()
+        current_scroll = self.verticalScrollBar().value()
+        
+        try:
+            # Clear existing document first
+            self.document().clear()
+            
+            # Read and format lines in chunks to reduce memory usage
+            CHUNK_SIZE = 1000
+            total_lines = self.loader.get_line_count()
+            formatted_text = []
+            
+            for start in range(0, total_lines, CHUNK_SIZE):
+                end = min(start + CHUNK_SIZE, total_lines)
+                lines = self.loader.read_lines(start, end - start)
+                formatted_lines = [self.log_formatter.format_log_entry(line) for line in lines]
+                formatted_text.extend(formatted_lines)
+                
+                # Free up memory
+                lines = None
+                formatted_lines = None
+            
+            self.setPlainText("\n".join(formatted_text))
+            
+            # Free up memory
+            formatted_text = None
+            log_memory_usage(f"After refreshing content for {self.file_path}")
+            
+        except Exception as e:
+            logger.error(f"Error refreshing content for {self.file_path}: {e}")
+            self.setPlainText(f"Error refreshing file: {e}")
+            
+        # Restore scroll position
+        self.verticalScrollBar().setValue(current_scroll)
 
 
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
+        log_memory_usage("MainWindow initialization")
         self.setWindowTitle("Log Viewer")
         self.resize(1200, 800)
 
@@ -355,10 +385,13 @@ class MainWindow(QMainWindow):
 
     def check_file_changes(self):
         """Check for changes in open files"""
+        # log_memory_usage("Start of file change check")
+        # Add a small delay between checking each tab to spread out the load
         for i in range(self.tab_widget.count()):
             widget = self.tab_widget.widget(i)
             if isinstance(widget, LogViewWidget):
-                widget.refresh()
+                if widget.loader.has_changed():  # Only refresh if needed
+                    widget.refresh()
 
     def closeEvent(self, event):
         """Handle application shutdown"""

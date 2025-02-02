@@ -43,19 +43,66 @@ git clone https://github.com/yourusername/log_viewer.git
 cd log_viewer
 ```
 
-2. Create and activate a virtual environment:
+2. Use the automated build scripts:
+
+### Windows (PowerShell):
+```powershell
+# Allow script execution if needed
+Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope Process
+
+# Build C++ and setup Python environment
+.\build.ps1
+
+# Or build everything and create executable
+.\build.ps1 -BuildExe
+
+# Additional options:
+.\build.ps1 -BuildCpp:$false    # Skip C++ build
+.\build.ps1 -BuildPython:$false # Skip Python setup
+.\build.ps1 -BuildType "Debug"  # Build in debug mode
+```
+
+### Linux/Mac:
+```bash
+# Give execution permission
+chmod +x build.sh
+
+# Build C++ and setup Python environment
+./build.sh
+
+# Or build everything and create executable
+./build.sh --build-exe
+
+# Additional options:
+./build.sh --no-cpp         # Skip C++ build
+./build.sh --no-python      # Skip Python setup
+./build.sh --build-type Debug  # Build in debug mode
+```
+
+The build scripts will:
+- Check for required dependencies (CMake, Python)
+- Build the C++ component
+- Set up a Python virtual environment
+- Install required Python packages
+- Optionally create a standalone executable
+
+### Manual Installation:
+
+If you prefer to install manually:
+
+1. Create and activate a virtual environment:
 ```bash
 python -m venv .venv
 .venv\Scripts\activate  # Windows
 source .venv/bin/activate  # Linux/Mac
 ```
 
-3. Install Python dependencies:
+2. Install Python dependencies:
 ```bash
 pip install -r requirements.txt
 ```
 
-4. Build the C++ module:
+3. Build the C++ module:
 ```bash
 cmake -B build -S . -G "Visual Studio 17 2022" -A x64
 cmake --build build --config Release
@@ -63,10 +110,13 @@ cmake --build build --config Release
 
 ## Usage
 
-Run the application:
+### Running from Source:
 ```bash
 python src/python/main.py
 ```
+
+### Running the Executable:
+After building with `-BuildExe` or `--build-exe`, find the standalone executable in the `dist` directory.
 
 ### Features:
 - Open individual log files via File -> Open File

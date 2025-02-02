@@ -97,6 +97,31 @@ log_viewer/
 └── README.md
 ```
 
+## Roadmap
+
+The following features and improvements are planned for future releases:
+
+- **Enhanced Log Formatting**
+  - Improve log format detection and parsing
+  - Add support for common log formats
+  - Implement customizable format templates
+
+- **Advanced Filtering and Search**
+  - Real-time log filtering capabilities
+  - Full-text search with regex support
+  - Customizable highlighting rules
+
+- **Cross-Platform Optimization**
+  - Enhanced support for Linux and macOS
+  - Platform-specific performance improvements
+  - Native look and feel on each OS
+
+- **Additional Tools and Features**
+  - Log analysis tools
+  - Statistical insights
+  - Export and reporting capabilities
+  - Customizable dashboards
+
 ## Development
 
 - Python code is formatted using black

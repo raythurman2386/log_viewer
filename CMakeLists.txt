@@ -8,14 +8,16 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 # Find Python
 find_package(Python COMPONENTS Interpreter Development REQUIRED)
 
-# Add pybind11 from the virtual environment
-execute_process(
-    COMMAND "${Python_EXECUTABLE}" -c "import pybind11; print(pybind11.get_cmake_dir())"
-    OUTPUT_VARIABLE PYBIND11_CMAKE_DIR
-    OUTPUT_STRIP_TRAILING_WHITESPACE
+# Include FetchContent
+include(FetchContent)
+
+# Fetch pybind11
+FetchContent_Declare(
+    pybind11
+    GIT_REPOSITORY https://github.com/pybind/pybind11
+    GIT_TAG        v2.11.1
 )
-list(APPEND CMAKE_PREFIX_PATH "${PYBIND11_CMAKE_DIR}")
-find_package(pybind11 CONFIG REQUIRED)
+FetchContent_MakeAvailable(pybind11)
 
 # Add source files
 set(SOURCES

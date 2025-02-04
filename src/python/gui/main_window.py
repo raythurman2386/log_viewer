@@ -156,9 +156,26 @@ class LogViewWidget(QTextEdit):
 
     def load_content(self):
         try:
+            # Create new document and highlighter
+            new_doc = QTextDocument(self)
+            new_highlighter = LogHighlighter(new_doc)
+
+            # Read and format lines
             lines = self.loader.read_lines(0, self.loader.get_line_count())
             formatted_lines = [self.log_formatter.format_log_entry(line) for line in lines]
-            self.setPlainText("\n".join(formatted_lines))
+
+            # Set formatted text to new document
+            new_doc.setPlainText("\n".join(formatted_lines))
+
+            # Safely replace old document and highlighter
+            old_doc = self.document()
+            old_highlighter = self.highlighter
+            self.setDocument(new_doc)
+            self.highlighter = new_highlighter
+
+            # Clean up old resources
+            if old_doc:
+                old_doc.deleteLater()
         except Exception as e:
             logger.error(f"Error loading content for {self.file_path}: {e}")
             self.setPlainText(f"Error loading file: {e}")
@@ -167,43 +184,45 @@ class LogViewWidget(QTextEdit):
         """Refresh the content if the file has changed."""
         if not self.loader.has_changed():
             return
-            
+
         log_memory_usage(f"Before refreshing content for {self.file_path}")
-        logger.debug(f"Refreshing content for {self.file_path}")
         self.loader.reload()
         current_scroll = self.verticalScrollBar().value()
-        
+
         try:
-            # Clear existing document first
-            self.document().clear()
-            
+            # Create new document and highlighter
+            new_doc = QTextDocument(self)
+            new_highlighter = LogHighlighter(new_doc)
+
             # Read and format lines in chunks to reduce memory usage
             CHUNK_SIZE = 1000
             total_lines = self.loader.get_line_count()
             formatted_text = []
-            
+
             for start in range(0, total_lines, CHUNK_SIZE):
-                end = min(start + CHUNK_SIZE, total_lines)
-                lines = self.loader.read_lines(start, end - start)
-                formatted_lines = [self.log_formatter.format_log_entry(line) for line in lines]
-                formatted_text.extend(formatted_lines)
-                
-                # Free up memory
-                lines = None
-                formatted_lines = None
-            
-            self.setPlainText("\n".join(formatted_text))
-            
-            # Free up memory
-            formatted_text = None
-            log_memory_usage(f"After refreshing content for {self.file_path}")
-            
+                lines = self.loader.read_lines(start, CHUNK_SIZE)
+                formatted_text.extend([self.log_formatter.format_log_entry(line) for line in lines])
+
+            # Set formatted text to new document
+            new_doc.setPlainText("\n".join(formatted_text))
+
+            # Safely replace old document and highlighter
+            old_doc = self.document()
+            old_highlighter = self.highlighter
+            self.setDocument(new_doc)
+            self.highlighter = new_highlighter
+
+            # Clean up old resources
+            if old_doc:
+                old_doc.deleteLater()
+            if old_highlighter:
+                old_highlighter.deleteLater()
+
+            # Restore scroll position
+            self.verticalScrollBar().setValue(current_scroll)
         except Exception as e:
-            logger.error(f"Error refreshing content for {self.file_path}: {e}")
-            self.setPlainText(f"Error refreshing file: {e}")
-            
-        # Restore scroll position
-        self.verticalScrollBar().setValue(current_scroll)
+            logger.error(f"Error refreshing content: {str(e)}")
+            raise
 
 
 class MainWindow(QMainWindow):
@@ -385,12 +404,14 @@ class MainWindow(QMainWindow):
 
     def check_file_changes(self):
         """Check for changes in open files"""
-        # log_memory_usage("Start of file change check")
-        # Add a small delay between checking each tab to spread out the load
+        if not self.refresh_timer.isActive():
+            self.refresh_timer.start(1000)
+
+        # Check for file changes
         for i in range(self.tab_widget.count()):
             widget = self.tab_widget.widget(i)
             if isinstance(widget, LogViewWidget):
-                if widget.loader.has_changed():  # Only refresh if needed
+                if widget.loader.has_changed():
                     widget.refresh()
 
     def closeEvent(self, event):
